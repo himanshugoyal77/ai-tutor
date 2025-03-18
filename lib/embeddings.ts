@@ -19,30 +19,31 @@ export async function encodeText(text: string): Promise<number[]> {
 export function getMostRelevantUserHistory(
   embeddings: number[][],
   inputEmbedding: number[],
-  userHistories: string[]
-): string {
-  if (embeddings.length === 0) return "I don't have enough data to determine your favorite database.";
-
-  let bestMatchIndex = -1;
-  let highestSimilarity = -1;
+  userHistories: string[],
+  topN: number = 3
+): string[] {
+  if (embeddings.length === 0)
+    return ["I don't have enough data to determine your favorite database."];
 
   const inputTensor = tf.tensor1d(inputEmbedding);
+  const similarities: { index: number; similarity: number }[] = [];
 
+  // Compute cosine similarity for all user histories
   for (let i = 0; i < embeddings.length; i++) {
     const embTensor = tf.tensor1d(embeddings[i]);
 
-    // Compute cosine similarity: (A . B) / (||A|| * ||B||)
     const dotProduct = inputTensor.dot(embTensor).dataSync()[0];
     const normInput = inputTensor.norm().dataSync()[0];
     const normEmb = embTensor.norm().dataSync()[0];
 
     const similarity = dotProduct / (normInput * normEmb + 1e-8); // Avoid division by zero
-
-    if (similarity > highestSimilarity) {
-      highestSimilarity = similarity;
-      bestMatchIndex = i;
-    }
+    similarities.push({ index: i, similarity });
   }
 
-  return bestMatchIndex !== -1 ? userHistories[bestMatchIndex] : "I couldn't determine your favorite database.";
+  // Sort by highest similarity and select the top `topN` results
+  similarities.sort((a, b) => b.similarity - a.similarity);
+  const topIndices = similarities.slice(0, topN).map((s) => s.index);
+
+  // Return top `topN` most relevant user histories
+  return topIndices.map((index) => userHistories[index]);
 }
