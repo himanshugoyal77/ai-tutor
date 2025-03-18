@@ -7,6 +7,22 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
+import { Fredoka, Baloo_2 } from "next/font/google";
+
+// Load Fredoka font
+const fredoka = Fredoka({
+  subsets: ["latin"],
+  weight: ["400", "500", "700"],
+  variable: "--font-fredoka",
+});
+
+// Load Baloo 2 font
+const baloo = Baloo_2({
+  subsets: ["latin"],
+  weight: ["400", "500", "700"],
+  variable: "--font-baloo",
+});
+
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
@@ -25,7 +41,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} 
+        ${fredoka.variable} ${baloo.variable}
+        antialiased`}
       >
         {children}
       </body>
