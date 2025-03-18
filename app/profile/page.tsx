@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { useState } from "react";
 import supabaseClient from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 
 type ProfileFormData = {
   email: string;
@@ -15,9 +16,17 @@ type ProfileFormData = {
   learning_goals: string;
 };
 
+const steps = [
+  { title: "👋 Let's Get Started!", fields: ["username", "age"] },
+  { title: "📚 School Info", fields: ["standard"] },
+  { title: "⭐ Your Favorites", fields: ["favourite_subjects"] },
+  { title: "🎯 Learning Goals", fields: ["learning_goals"] },
+];
+
 export default function ProfileForm() {
   const router = useRouter();
-  const { register, handleSubmit, reset } = useForm<ProfileFormData>();
+  const { register, handleSubmit, reset, trigger } = useForm<ProfileFormData>();
+  const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -95,49 +104,167 @@ export default function ProfileForm() {
     setLoading(false);
   };
 
-  return (
-    <div className="max-w-md mx-auto bg-white p-6 rounded-lg shadow-md">
-      <h2 className="text-xl font-semibold mb-4">Create Profile</h2>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        <input
-          type="text"
-          {...register("username", { required: true })}
-          placeholder="Username"
-          className="w-full p-2 border rounded"
-        />
+  const nextStep = async () => {
+    const fields = steps[currentStep].fields;
+    const isValid = await trigger(fields as any);
 
-        <input
-          type="number"
-          {...register("age", { valueAsNumber: true })}
-          placeholder="Age"
-          className="w-full p-2 border rounded"
+    if (isValid) {
+      setCurrentStep((prev) => Math.min(prev + 1, steps.length - 1));
+    }
+  };
+
+  const prevStep = () => {
+    setCurrentStep((prev) => Math.max(prev - 1, 0));
+  };
+
+  const StepProgress = () => (
+    <div className="flex justify-center gap-2 mb-8">
+      {steps.map((_, index) => (
+        <div
+          key={index}
+          className={`w-3 h-3 rounded-full ${
+            index === currentStep ? "bg-[#FF6B6B]" : "bg-[#4ECDC4]/30"
+          }`}
         />
-        <input
-          type="text"
-          {...register("standard")}
-          placeholder="Standard (e.g. Grade 5)"
-          className="w-full p-2 border rounded"
-        />
-        <input
-          type="text"
-          {...register("favourite_subjects")}
-          placeholder="Favourite Subjects (comma separated)"
-          className="w-full p-2 border rounded"
-        />
-        <textarea
-          {...register("learning_goals")}
-          placeholder="Learning Goals"
-          className="w-full p-2 border rounded"
-        />
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full p-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-        >
-          {loading ? "Saving..." : "Save Profile"}
-        </button>
-      </form>
-      {message && <p className="mt-4 text-center text-green-500">{message}</p>}
+      ))}
+    </div>
+  );
+
+  const StepContent = () => {
+    switch (currentStep) {
+      case 0:
+        return (
+          <div className="space-y-6">
+            <div className="flex flex-col gap-4">
+              <label className="text-[#2D3047] font-[Baloo] text-xl">
+                What should we call you? 🎩
+              </label>
+              <input
+                {...register("username", { required: true })}
+                placeholder="Super Learner Name"
+                className="p-4 rounded-xl border-2 border-[#4ECDC4] focus:border-[#FF6B6B] focus:ring-2 focus:ring-[#FFE66D]"
+              />
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <label className="text-[#2D3047] font-[Baloo] text-xl">
+                How young are you? 🎂
+              </label>
+              <input
+                type="number"
+                {...register("age", { valueAsNumber: true })}
+                placeholder="Enter your magic number"
+                className="p-4 rounded-xl border-2 border-[#4ECDC4] focus:border-[#FF6B6B]"
+              />
+            </div>
+          </div>
+        );
+
+      case 1:
+        return (
+          <div className="flex flex-col gap-6">
+            <label className="text-[#2D3047] font-[Baloo] text-xl">
+              What grade are you in? 🏫
+            </label>
+            <input
+              {...register("standard")}
+              placeholder="Example: Grade 5"
+              className="p-4 rounded-xl border-2 border-[#4ECDC4] focus:border-[#FF6B6B]"
+            />
+          </div>
+        );
+
+      case 2:
+        return (
+          <div className="flex flex-col gap-6">
+            <label className="text-[#2D3047] font-[Baloo] text-xl">
+              What subjects make you excited? 🌟
+            </label>
+            <input
+              {...register("favourite_subjects")}
+              placeholder="Math, Science, Art..."
+              className="p-4 rounded-xl border-2 border-[#4ECDC4] focus:border-[#FF6B6B]"
+            />
+            <p className="text-[#4ECDC4] text-sm">Separate with commas</p>
+          </div>
+        );
+
+      case 3:
+        return (
+          <div className="flex flex-col gap-6">
+            <label className="text-[#2D3047] font-[Baloo] text-xl">
+              What do you want to conquer? 🏆
+            </label>
+            <textarea
+              {...register("learning_goals")}
+              placeholder="I want to master fractions, learn about dinosaurs..."
+              className="p-4 rounded-xl border-2 border-[#4ECDC4] h-32 focus:border-[#FF6B6B]"
+            />
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="min-h-screen w-full flex flex-col bg-gradient-to-br from-[#FFF3E0] to-[#E8F4FF] pt-5 relative overflow-hidden items-center justify-center">
+      <div className="absolute -z-10 inset-0 overflow-hidden">
+        <div className="absolute w-48 h-48 bg-[#FF6B6B]/10 rounded-full -top-24 -left-24 animate-float"></div>
+        <div className="absolute w-64 h-64 bg-[#4ECDC4]/10 rounded-full -bottom-32 -right-32 animate-float-delayed"></div>
+      </div>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="max-w-2xl mx-auto bg-white p-8 rounded-3xl shadow-xl border-4 border-[#FFE66D]"
+      >
+        <h2 className="text-3xl font-[Fredoka] text-center mb-6 text-[#FF6B6B]">
+          {steps[currentStep].title}
+        </h2>
+
+        <StepProgress />
+
+        <form onSubmit={handleSubmit(onSubmit)}>
+          <StepContent />
+
+          <div className="flex justify-between mt-8 gap-4">
+            {currentStep > 0 && (
+              <button
+                type="button"
+                onClick={prevStep}
+                className="px-6 py-3 bg-[#4ECDC4] text-white rounded-xl font-[Baloo] hover:bg-[#3DA89F] transition-colors"
+              >
+                ← Back
+              </button>
+            )}
+
+            {currentStep < steps.length - 1 ? (
+              <button
+                type="button"
+                onClick={nextStep}
+                className="ml-auto px-8 py-3 bg-[#FF6B6B] text-white rounded-xl font-[Baloo] hover:bg-[#FF5252] transition-colors"
+              >
+                Next Step →
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={loading}
+                className="ml-auto px-8 py-3 bg-gradient-to-r from-[#FF6B6B] to-[#4ECDC4] text-white rounded-xl font-[Baloo] hover:scale-105 transition-all"
+              >
+                {loading ? "🚀 Launching..." : "Start Learning Adventure!"}
+              </button>
+            )}
+          </div>
+        </form>
+
+        {message && (
+          <p className="mt-4 text-center text-[#4ECDC4] font-[Comic Neue]">
+            {message}
+          </p>
+        )}
+      </motion.div>
     </div>
   );
 }
