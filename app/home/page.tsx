@@ -45,9 +45,32 @@ const page = () => {
   const handleClick = async () => {
     const res = await fetch("/api/history", {
       method: "POST",
-      body: JSON.stringify({ userId, content: `User understands the explaination on ${input}` }),
+      body: JSON.stringify({
+        userId,
+        content: `User understands the explaination on ${input}`,
+      }),
     });
     console.log("History update clicked", await res.json());
+  };
+
+  const toggleHint = async () => {
+    const { data: profile } = await supabaseClient
+      .from("profile")
+      .select("give_hints")
+      .eq("id", userId)
+      .single();
+
+    const { error } = await supabaseClient
+      .from("profile")
+      .update({ give_hints: !profile?.give_hints })
+      .eq("id", userId);
+
+    if (error) {
+      console.error("Supabase Update Error:", error.message);
+      return res.status(500).json({ error: error.message });
+    }
+
+    alert("suceesfully toggled");
   };
 
   return (
@@ -56,7 +79,7 @@ const page = () => {
         <input value={input} onChange={(e) => setInput(e.target.value)} />
         <button
           onClick={async () => {
-            Promise.all([handleSend(), updateHistory()]);
+            Promise.all([handleSend()]);
           }}
         >
           Send
@@ -77,6 +100,12 @@ const page = () => {
       >
         logout
       </button>
+
+      <br />
+
+      {/* switch */}
+
+      <button onClick={toggleHint}>hide hints</button>
     </div>
   );
 };
