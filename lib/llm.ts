@@ -2,126 +2,206 @@ import { Mistral } from "@mistralai/mistralai";
 import { encodeText, getMostRelevantUserHistory } from "./embeddings";
 import supabaseClient from "./supabaseClient";
 
-const client = new Mistral({
-  apiKey: process.env.MISTRAL_API_KEY!,
-});
+const client = new Mistral({ apiKey: "WaqqHNtuthNSd64Td3LjnjHXChxeVsld" });
+
+interface TutorResponse {
+  answer: string;
+  steps: string[];
+  followup_questions: string[];
+  confidence_score: number;
+  key_concepts: string[];
+  is_final_answer: boolean;
+}
+
+function validateStructure(output: string): TutorResponse {
+  try {
+    const result = JSON.parse(output);
+    if (!result.answer) throw new Error("Missing answer field");
+    if (!Array.isArray(result.steps)) throw new Error("Steps must be an array");
+    if (!Array.isArray(result.followup_questions))
+      throw new Error("Followup questions must be an array");
+    if (typeof result.confidence_score !== "number")
+      throw new Error("Confidence score must be a number");
+    if (!Array.isArray(result.key_concepts))
+      throw new Error("Key concepts must be an array");
+    if (typeof result.is_final_answer !== "boolean")
+      throw new Error("is_final_answer must be a boolean");
+    return result;
+  } catch (error) {
+    console.error("Invalid JSON structure:", error);
+    return {
+      answer: "Error formatting response. Please try again.",
+      steps: [],
+      followup_questions: [],
+      confidence_score: 0,
+      key_concepts: [],
+      is_final_answer: true, // Default to final answer on error
+    };
+  }
+}
 
 export async function generatePersonalizedResponse(
   userId: string,
   input: string
-) {
-  console.log("Fetching user history for:", userId);
+): Promise<TutorResponse> {
+  try {
+    // Fetch conversation history
+    const { data: conversationHistory, error: historyError1 } =
+      await supabaseClient
+        .from("conversations")
+        .select("role, message, metadata")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(5);
 
-  // Fetch conversation history (last 5 messages)
-  const { data: conversationHistory, error: historyError } =
-    await supabaseClient
-      .from("conversations")
-      .select("role, message")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(5);
+    if (historyError1)
+      throw new Error(`Conversation history error: ${historyError1.message}`);
 
-  if (historyError) {
-    console.error("Error fetching conversation history:", historyError);
-    return "Error retrieving previous messages.";
-  }
+    // Fetch user profile
+    const { data: userProfile, error: profileError } = await supabaseClient
+      .from("profile")
+      .select(
+        "username, age, standard, favourite_subjects, learning_goals, give_hints"
+      )
+      .eq("id", userId)
+      .single();
 
-  console.log("Conversation History:", conversationHistory);
+    if (profileError)
+      throw new Error(`Profile fetch error: ${profileError.message}`);
 
-  // Fetch user profile
-  const { data: userProfile, error } = await supabaseClient
-    .from("profile")
-    .select(
-      "username, age, standard, favourite_subjects, learning_goals, give_hints"
-    )
-    .eq("id", userId)
-    .single();
+    // Fetch relevant user histories
+    const { data: userHistories, error: historyError } = await supabaseClient
+      .from("user_histories")
+      .select("content")
+      .eq("user_id", userId);
 
-  if (error) {
-    console.error("Error fetching user profile:", error);
-    return "Error fetching user profile.";
-  }
+    if (historyError)
+      throw new Error(`User history error: ${historyError.message}`);
 
-  console.log("User Profile:", userProfile, userId);
+    // Get relevant history embeddings
+    const embeddings = await Promise.all(
+      userHistories.map((h) => encodeText(h.content))
+    );
+    const relevantHistories = getMostRelevantUserHistory(
+      embeddings,
+      await encodeText(input),
+      userHistories.map((h) => h.content),
+      3
+    );
 
-  // Fetch relevant history from `user_histories`
-  const userHistories = await fetch(
-    `http://localhost:3000/api/history?userId=${userId}`
-  ).then((res) => res.json());
+    // Build conversation context
+    const conversationContext =
+      conversationHistory
+        ?.map((msg) => {
+          if (msg.role === "assistant" && msg.metadata) {
+            return `${msg.role}: ${msg.metadata.answer}`;
+          }
+          return `${msg.role}: ${msg.message}`;
+        })
+        .join("\n") || "No prior conversation found.";
 
-  const embeddings = await Promise.all(
-    userHistories.data.map((h) => encodeText(h.content))
-  );
-  const inputEmbedding = await encodeText(input);
-  const relevantHistories = getMostRelevantUserHistory(
-    embeddings,
-    inputEmbedding,
-    userHistories.data.map((h) => h.content),
-    3
-  );
+    // Construct the AI prompt
+    const guidedPrompt = `You are an AI tutor for ${userProfile.username}, a ${
+      userProfile.age
+    }-year-old in grade ${userProfile.standard}.
+    
+    **User Information:**
+    - Age: ${userProfile.age}
+    - Grade: ${userProfile.standard}
+    - Favorite Subjects: ${userProfile.favourite_subjects.join(", ")}
+    - Learning Goals: ${userProfile.learning_goals}
+    - Hint Mode: ${userProfile.give_hints ? "Enabled" : "Disabled"}
 
-  console.log("Most Relevant User Histories:", relevantHistories);
+    **Previous Conversation:**
+    ${conversationContext}
 
-  // Decide the response format based on `give_hints`
-  const hintMode = userProfile.give_hints
-    ? `- **Step 1:** Ask a guiding question before revealing the full answer.
-       - **Step 2:** Adjust the difficulty based on their previous knowledge.
-       - **Step 3:** Encourage interaction by breaking down complex topics.`
-    : `- Directly provide the answer without guiding questions.
-       - Keep the response clear, concise, and to the point.`;
+    **Related Topics Studied Before:**
+    ${relevantHistories.length ? relevantHistories.join("\n") : "None"}
 
-  // Include conversation history in the prompt
-  let conversationContext = conversationHistory
-    .reverse()
-    .map((msg) => `${msg.role}: ${msg.message}`)
-    .join("\n");
+    **User Question:** ${input}
 
-  // Construct the prompt
-  let guidedPrompt = `You are an AI tutor for ${userProfile.username}.
-  
-  **User Information:**
-  - AGE: ${userProfile.age}
-  - GRADE: ${userProfile.standard}
-  - FAVORITE SUBJECTS: ${userProfile.favourite_subjects.join(", ")}
-  - LEARNING GOALS: ${userProfile.learning_goals}
+    **Response Requirements:**
+    1. ${
+      userProfile.give_hints
+        ? "Guide the user to the answer through Socratic questioning (3-5 steps)"
+        : "Provide a direct, comprehensive answer"
+    }
+    2. Include follow-up questions to encourage deeper exploration
+    3. Format response as JSON with:
+       - answer: string
+       - steps: string[]
+       - followup_questions: string[]
+       - confidence_score: number
+       - key_concepts: string[]
+       - is_final_answer: boolean`;
 
-  **Previous Conversation:**
-  ${conversationContext || "No prior conversation found."}
+    // Generate AI response
+    const response = await client.chat.complete({
+      model: "mistral-large-latest",
+      messages: [
+        {
+          role: "system",
+          content: `You are an interactive tutor. Respond in valid JSON.${
+            userProfile.give_hints
+              ? " Ask probing questions before revealing the final answer."
+              : " Provide direct answers immediately."
+          }`,
+        },
+        { role: "user", content: guidedPrompt },
+      ],
+      responseFormat: { type: "json_object" },
+    });
 
-  **Related Topics User Has Studied Before:**
-  ${
-    relevantHistories.length > 0
-      ? relevantHistories.join("\n")
-      : "No relevant history found."
-  }
+    const rawResponse = response.choices[0].message.content;
+    const aiResponse = validateStructure(rawResponse);
 
-  **User Question:** ${input}
-
-  **Your Task:**
-  ${hintMode}`;
-
-  // Generate AI response
-  const response = await client.chat.complete({
-    model: "mistral-large-latest",
-    messages: [
+    // Store conversation with metadata
+    await supabaseClient.from("conversations").insert([
       {
-        role: "system",
-        content:
-          "You are an interactive AI tutor. Guide the user step by step.",
+        user_id: userId,
+        role: "user",
+        message: input,
+        metadata: { question: input },
       },
-      { role: "user", content: guidedPrompt },
-    ],
-  });
+      {
+        user_id: userId,
+        role: "assistant",
+        message: aiResponse.answer,
+        metadata: aiResponse,
+      },
+    ]);
 
-  const aiResponse = response.choices[0].message.content;
+    return aiResponse;
+  } catch (error) {
+    console.error("Error in generatePersonalizedResponse:", error);
+    return {
+      answer: "I'm having trouble generating a response. Please try again.",
+      steps: [],
+      followup_questions: [],
+      confidence_score: 0,
+      key_concepts: [],
+      is_final_answer: true,
+    };
+  }
+}
 
-  console.log("AI Response:", aiResponse);
+// Helper function for interactive sessions
+export async function handleTutorSession(userId: string, input: string) {
+  let response = await generatePersonalizedResponse(userId, input);
+  const responses = [response];
 
-  // Store user message and AI response in `conversations`
-  await supabaseClient.from("conversations").insert([
-    { user_id: userId, role: "user", message: input },
-    { user_id: userId, role: "assistant", message: aiResponse },
-  ]);
+  // Continue conversation if in hint mode and not final answer
+  while (response.is_final_answer === false) {
+    const nextQuestion = response.followup_questions[0] || input;
+    response = await generatePersonalizedResponse(userId, nextQuestion);
+    responses.push(response);
 
-  return aiResponse;
+    // Safety break
+    if (responses.length > 5) break;
+  }
+
+  return {
+    final_answer: responses[responses.length - 1].answer,
+    conversation_steps: responses,
+  };
 }

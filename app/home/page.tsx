@@ -1,5 +1,8 @@
 "use client";
 
+
+import TutorChat from "@/components/ChatInterface";
+import ChatInterface from "@/components/ChatInterface";
 import supabaseClient from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import React, { useState } from "react";
@@ -67,7 +70,7 @@ const page = () => {
 
     if (error) {
       console.error("Supabase Update Error:", error.message);
-      return res.status(500).json({ error: error.message });
+      return;
     }
 
     alert("suceesfully toggled");
@@ -75,37 +78,10 @@ const page = () => {
 
   return (
     <div>
-      <div>
-        <input value={input} onChange={(e) => setInput(e.target.value)} />
-        <button
-          onClick={async () => {
-            Promise.all([handleSend()]);
-          }}
-        >
-          Send
-        </button>
-        <p>{response}</p>
-      </div>
-      <h1>Chat with me!</h1>
-
-      <h2>Logged in as: {userId}</h2>
-      <br />
-      <button onClick={handleClick}>Do you understand the topic</button>
-
-      <button
-        onClick={async () => {
-          await supabaseClient.auth.signOut();
-          router.push("/");
-        }}
-      >
-        logout
-      </button>
-
-      <br />
-
-      {/* switch */}
-
-      <button onClick={toggleHint}>hide hints</button>
+      {/* <ChatInterface userId={userId} /> */}
+      {/* <StepwiseChat userId={userId} /> */}
+      <TutorChat userId={userId} userName={"Himanshu"} />
+      {/* <ChatBox userId={userId} /> */}
     </div>
   );
 };

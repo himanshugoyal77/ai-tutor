@@ -1,10 +1,11 @@
 "use client";
 
 import { useForm } from "react-hook-form";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import supabaseClient from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
+import LoadingPage from "@/components/LoadingScreen";
 
 type ProfileFormData = {
   email: string;
@@ -29,6 +30,39 @@ export default function ProfileForm() {
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      setLoading(true);
+      const {
+        data: { user },
+      } = await supabaseClient.auth.getUser();
+
+      const { data: profile, error } = await supabaseClient
+        .from("profile")
+        .select("*")
+        .eq("id", user?.id)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Error fetching profile:", error.message);
+        return;
+      }
+
+      if (profile?.isprofile_setup) {
+        router.push("/home");
+        setLoading(false);
+      }
+
+      setLoading(false);
+    };
+
+    fetchProfile();
+  }, []);
+
+  if (loading) {
+    return <LoadingPage />;
+  }
 
   const onSubmit = async (data: ProfileFormData) => {
     setLoading(true);
@@ -57,6 +91,7 @@ export default function ProfileForm() {
       learning_goals: data.learning_goals
         ? data.learning_goals.split(",").map((s) => s.trim())
         : [],
+      isprofile_setup: true,
     };
 
     // check if user already has a profile
@@ -225,7 +260,7 @@ export default function ProfileForm() {
 
         <StepProgress />
 
-        <form onSubmit={handleSubmit(onSubmit)}>
+        <form>
           <StepContent />
 
           <div className="flex justify-between mt-8 gap-4">
@@ -251,6 +286,7 @@ export default function ProfileForm() {
               <button
                 type="submit"
                 disabled={loading}
+                onClick={handleSubmit(onSubmit)}
                 className="ml-auto px-8 py-3 bg-gradient-to-r from-[#FF6B6B] to-[#4ECDC4] text-white rounded-xl font-[Baloo] hover:scale-105 transition-all"
               >
                 {loading ? "🚀 Launching..." : "Start Learning Adventure!"}
