@@ -2,14 +2,102 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { generatePersonalizedResponse, handleTutorSession } from "@/lib/llm";
 import supabaseClient from "@/lib/supabaseClient";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
-const TutorChat = ({ userId, userName }) => {
+const formatContent = (content) => {
+  // Split into paragraphs preserving \n
+  return content.split("\n").map((line, index) => {
+    // Format numbered lists
+    if (/^\d+\.\s/.test(line)) {
+      return (
+        <div key={index} className="flex items-start my-2">
+          <span className="text-[#FF6B6B] font-bold mr-2">
+            {line.match(/^\d+/)[0]}.
+          </span>
+          <span className="flex-1">{line.replace(/^\d+\.\s*/, "")}</span>
+        </div>
+      );
+    }
+
+    // Format lettered options
+    if (/^[a-zA-Z]\)\s/.test(line)) {
+      return (
+        <div key={index} className="flex items-start my-2">
+          <span className="text-[#4ECDC4] font-bold mr-2">{line[0]})</span>
+          <span className="flex-1">{line.slice(2)}</span>
+        </div>
+      );
+    }
+
+    // Format bold text (remove markdown **)
+    if (/\*\*(.*?)\*\*/.test(line)) {
+      return (
+        <strong key={index} className="text-[#2D3047]">
+          {line.replace(/\*\*/g, "")}
+        </strong>
+      );
+    }
+
+    return <div key={index}>{line}</div>;
+  });
+};
+
+const TutorChat = ({ userId, userName, topic }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const chatContainerRef = useRef(null);
   const [avatar, setAvatar] = useState("robot"); // Default avatar
   const [giveHints, setGiveHints] = useState(true);
+  const [showEmojiAnimation, setShowEmojiAnimation] = useState(false);
+  const [selectedEmoji, setSelectedEmoji] = useState(null);
+  const [userAvatar, setUserAvatar] = useState("👧"); // Default user avatar
+  const [celebrationCount, setCelebrationCount] = useState(0);
+  const [hasCelebrated, setHasCelebrated] = useState(false);
+  const [likedMessages, setLikedMessages] = useState([]);
+
+  useEffect(() => {
+    if (topic) {
+      setInput(`Can you explain ${topic} to me?`);
+    }
+  }, [userId, topic]);
+
+  const handleLike = (index) => {
+    setMessages((prevMessages) => {
+      const newMessages = [...prevMessages];
+      if (newMessages[index].role === "ai") {
+        const updatedLikes = newMessages[index].likes + 1;
+
+        // Check if we've reached 10 likes and haven't celebrated yet
+        if (updatedLikes === 10 && !hasCelebrated) {
+          setCelebrationCount((prev) => prev + 1);
+          setHasCelebrated(true);
+          handleClick("likes");
+        }
+
+        newMessages[index] = {
+          ...newMessages[index],
+          likes: updatedLikes,
+          disliked: false,
+        };
+      }
+      return newMessages;
+    });
+  };
+
+  // Celebration animation effect
+  useEffect(() => {
+    if (celebrationCount > 0) {
+      setSelectedEmoji("🎉");
+      setShowEmojiAnimation(true);
+      const timer = setTimeout(() => {
+        setShowEmojiAnimation(false);
+        setHasCelebrated(false); // Reset after animation
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [celebrationCount]);
 
   // Scroll to bottom of chat when messages change
   useEffect(() => {
@@ -27,8 +115,14 @@ const TutorChat = ({ userId, userName }) => {
     teacher: "👩‍🏫",
   };
 
+  // User avatars for selection
+  const userAvatars = ["👦", "👧", "👨", "👩", "🧒"];
+
   const sendMessage = async (message) => {
-    setMessages((prev) => [...prev, { role: "user", content: message }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: message, avatar: userAvatar },
+    ]);
     setInput("");
     setIsThinking(true);
 
@@ -37,7 +131,12 @@ const TutorChat = ({ userId, userName }) => {
       setIsThinking(false);
       setMessages((prev) => [
         ...prev,
-        { role: "ai", content: JSON.parse(response) },
+        {
+          role: "ai",
+          content: JSON.parse(response),
+          likes: 0,
+          disliked: false,
+        },
       ]);
     } catch (error) {
       setIsThinking(false);
@@ -52,13 +151,26 @@ const TutorChat = ({ userId, userName }) => {
               "Let's try a different question",
             ],
           },
+          likes: 0,
+          disliked: false,
         },
       ]);
     }
   };
 
   const changeAvatar = (newAvatar) => {
-    setAvatar(newAvatar);
+    setSelectedEmoji(avatars[newAvatar]);
+    setShowEmojiAnimation(true);
+
+    // After animation completes, update the avatar
+    setTimeout(() => {
+      setAvatar(newAvatar);
+      setShowEmojiAnimation(false);
+    }, 1500);
+  };
+
+  const changeUserAvatar = (newAvatar) => {
+    setUserAvatar(newAvatar);
   };
 
   // Fetch initial hint setting
@@ -84,8 +196,52 @@ const TutorChat = ({ userId, userName }) => {
       .eq("id", userId);
   };
 
+  const handleClick = async (type) => {
+    // type is either "likes" or "dislikes"
+    if (likedMessages.includes(messages[messages.length - 1].id)) return;
+
+    setLikedMessages((prev) => [...prev, messages[messages.length - 1].id]);
+
+    const res = await fetch("/api/history", {
+      method: "POST",
+      body: JSON.stringify({
+        userId,
+        content: `User ${type} the explaination on ${
+          // Get the last AI message
+          messages[messages.length - 1].content.mainResponse
+        }`,
+      }),
+    });
+    console.log("History update clicked", await res.json());
+  };
+
   return (
-    <div className="flex h-screen w-full bg-gradient-to-br from-[#FFE66D]/20 to-[#E1F5FE]/50 backdrop-blur-sm">
+    <div className="flex h-screen w-full bg-gradient-to-br from-[#FFE66D]/20 to-[#E1F5FE]/50 backdrop-blur-sm relative">
+      {/* Emoji Animation Overlay */}
+      <AnimatePresence>
+        {showEmojiAnimation && (
+          <motion.div
+            className="absolute inset-0 flex items-center justify-center z-50 bg-black/10 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="text-9xl"
+              initial={{ scale: 0.2, rotate: -20 }}
+              animate={{
+                scale: [0.2, 1.5, 1],
+                rotate: [-20, 20, 0],
+                y: [0, -50, 0],
+              }}
+              transition={{ duration: 1.2 }}
+            >
+              {selectedEmoji}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Fun Sidebar */}
       <div className="w-24 p-4 border-r-2 border-[#FFE66D] bg-[#E1F5FE] flex flex-col items-center rounded-tr-3xl rounded-br-3xl shadow-lg">
         <div className="mb-8 mt-4">
@@ -142,7 +298,8 @@ const TutorChat = ({ userId, userName }) => {
           <div className="text-2xl font-[Fredoka] text-[#FF6B6B] ml-4">
             <span className="text-[#4ECDC4]">STEP</span>WISE
           </div>
-          <div className="ml-auto text-[#2D3047] font-[Baloo]">
+          <div className="ml-auto text-[#2D3047] font-[Baloo] flex items-center">
+            <span className="mr-2">{userAvatar}</span>
             Happy learning, {userName}! ✨
           </div>
         </div>
@@ -190,7 +347,12 @@ const TutorChat = ({ userId, userName }) => {
                   } shadow-md`}
                 >
                   {message.role === "user" ? (
-                    <p className="font-[Baloo]">{message.content}</p>
+                    <div className="font-[Baloo] flex items-start">
+                      <div className="w-8 h-8 rounded-full bg-[#2D3047]/10 flex items-center justify-center mr-3 flex-shrink-0">
+                        {message.avatar || userAvatar}
+                      </div>
+                      <p>{message.content}</p>
+                    </div>
                   ) : (
                     <div className="font-[Baloo]">
                       <div className="flex items-center mb-2">
@@ -198,20 +360,60 @@ const TutorChat = ({ userId, userName }) => {
                         <span className="font-bold text-[#FF6B6B]">
                           StepWise
                         </span>
+
+                        {/* Like/Dislike Buttons */}
+                        <div className="ml-auto flex gap-2">
+                          <motion.button
+                            onClick={() => handleLike(index)}
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
+                            className="text-sm flex items-center gap-1"
+                          >
+                            <span
+                              onClick={() => handleClick("likes")}
+                              className={`${
+                                message.likes > 0
+                                  ? "text-[#4ECDC4]"
+                                  : "text-gray-400"
+                              }`}
+                            >
+                              👍
+                            </span>
+                            {message.likes > 0 && (
+                              <span className="text-[#4ECDC4] font-bold">
+                                {message.likes}
+                              </span>
+                            )}
+                          </motion.button>
+
+                          <motion.button
+                            onClick={() => handleClick("dislikes")}
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
+                            className={`text-sm ${
+                              message.disliked
+                                ? "text-[#FF6B6B]"
+                                : "text-gray-400"
+                            }`}
+                          >
+                            👎
+                          </motion.button>
+                        </div>
                       </div>
-                      <p>{message.content.mainResponse}</p>
-                      {message.content.followUpQuestions && (
+                      <div>{formatContent(message.content.mainResponse)}</div>
+                      {!giveHints && message.content.followUpQuestions && (
                         <div className="mt-4">
                           <p className="text-sm text-[#2D3047] mb-2">
-                            Think of these questions to learn more:
+                            Here are some follow-up questions you can ask:
                           </p>
                           <div className="flex flex-wrap gap-2">
                             {message.content.followUpQuestions.map((q, i) => (
                               <motion.button
                                 key={i}
                                 className="bg-[#FFE66D]/50 hover:bg-[#FFE66D] px-3 py-1 rounded-full text-sm text-[#2D3047]"
-                               
-                                //onClick={() => sendMessage(q)}
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                                onClick={() => sendMessage(q)}
                               >
                                 {q}
                               </motion.button>
