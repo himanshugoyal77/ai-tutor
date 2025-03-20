@@ -1,6 +1,5 @@
 "use client";
 
-
 import TutorChat from "@/components/ChatInterface";
 import ChatInterface from "@/components/ChatInterface";
 import supabaseClient from "@/lib/supabaseClient";
