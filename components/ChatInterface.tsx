@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { generatePersonalizedResponse, handleTutorSession } from "@/lib/llm";
 import supabaseClient from "@/lib/supabaseClient";
@@ -118,7 +118,27 @@ const TutorChat = ({ userId, userName, topic }) => {
   // User avatars for selection
   const userAvatars = ["👦", "👧", "👨", "👩", "🧒"];
 
+  const updateHistory = useCallback(
+    async (topic: string) => {
+      if (!userId) return;
+
+      await fetch("/api/history", {
+        method: "POST",
+        body: JSON.stringify({
+          userId,
+          content: `User interested in learning ${topic}`,
+        }),
+      });
+    },
+    [userId]
+  );
+
+
   const sendMessage = async (message) => {
+    if (messages.length === 0 && !topic) {
+      await updateHistory(message);
+    }
+
     setMessages((prev) => [
       ...prev,
       { role: "user", content: message, avatar: userAvatar },
