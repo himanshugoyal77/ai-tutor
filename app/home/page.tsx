@@ -96,8 +96,10 @@ const HomePage = () => {
 
   const handleTopicSelect = useCallback(
     async (topicTitle: string) => {
+      setLoading(true);
       await updateHistory(topicTitle);
       router.push(`/chat?topic=${encodeURIComponent(topicTitle)}`);
+      setLoading(false)
     },
     [updateHistory, router]
   );
@@ -213,6 +215,7 @@ const HomePage = () => {
           <h2 className="text-3xl font-[Fredoka] text-[#2D3047] mb-6">
             Popular Learning Topics
           </h2>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {defaultTopics.map((topic, index) => (
               <TopicCard
@@ -225,6 +228,14 @@ const HomePage = () => {
                 textColor="text-[#FF6B6B]"
               />
             ))}
+            <TopicCard
+              emoji="✨"
+              title="Custom Topic"
+              description="Want to learn something else? Click here to enter your own topic!"
+              onClick={() => router.push(`/chat`)}
+              borderColor="border-[#4ECDC4]"
+              textColor="text-[#4ECDC4]"
+            />
           </div>
         </div>
       </div>

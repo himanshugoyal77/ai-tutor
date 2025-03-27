@@ -1,6 +1,7 @@
 import { Mistral } from "@mistralai/mistralai";
 import { encodeText, getMostRelevantUserHistory } from "./embeddings";
 import supabaseClient from "./supabaseClient";
+import axios from "axios";
 
 const client = new Mistral({
   apiKey: "WaqqHNtuthNSd64Td3LjnjHXChxeVsld",
@@ -19,7 +20,7 @@ export async function generatePersonalizedResponse(
       .select("role, message")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
-      .limit(5);
+      .limit(10);
 
   if (historyError) {
     console.error("Error fetching conversation history:", historyError);
@@ -123,6 +124,27 @@ export async function generatePersonalizedResponse(
   const aiResponse = response.choices[0].message.content;
 
   console.log("AI Response:", aiResponse);
+
+  let evaluationResult;
+  try {
+    const evalResponse = await axios.post("http://localhost:5000/evaluate", {
+      text: aiResponse,
+      user_profile: {
+        username: userProfile.username,
+        age: userProfile.age,
+        standard: userProfile.standard,
+        favourite_subjects: userProfile.favourite_subjects,
+        learning_goals: userProfile.learning_goals,
+      },
+    });
+    evaluationResult = evalResponse.data;
+    console.log("Evaluation Result:", evalResponse);
+  } catch (error) {
+    console.error("Error evaluating response:", error);
+    evaluationResult = { error: "Evaluation failed" };
+  }
+
+  console.log("Evaluation Result:", evaluationResult);
 
   // Store user message and AI response in `conversations`
   await supabaseClient.from("conversations").insert([
