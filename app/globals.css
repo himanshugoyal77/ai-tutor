@@ -7,6 +7,10 @@
   font-family: "Playfair Display", serif;
 }
 
+.body-hide {
+  overflow: hidden !important;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

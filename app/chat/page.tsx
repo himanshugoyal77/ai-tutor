@@ -10,7 +10,7 @@ const page = () => {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [response, setResponse] = useState("");
-  const [userId, setUserId] = useState("");
+  const [user, setUser] = useState("");
   const searchParams = useSearchParams();
   const topic = searchParams.get("topic");
 
@@ -19,7 +19,7 @@ const page = () => {
       const { data } = await supabaseClient.auth.getSession();
       if (data?.session) {
         const { data: userData } = await supabaseClient.auth.getUser();
-        setUserId(userData.user?.id as string);
+        setUser(userData.user);
       } else {
         router.push("/");
       }
@@ -31,7 +31,7 @@ const page = () => {
   async function handleSend() {
     const res = await fetch("/api/chat", {
       method: "POST",
-      body: JSON.stringify({ input, userId }),
+      body: JSON.stringify({ input, user }),
     });
     setResponse(await res.text());
   }
@@ -39,7 +39,7 @@ const page = () => {
   async function updateHistory() {
     const res = await fetch("/api/history", {
       method: "POST",
-      body: JSON.stringify({ userId, content: `User interested in ${input}` }),
+      body: JSON.stringify({ user, content: `User interested in ${input}` }),
     });
     console.log("History update response:", await res.json());
 
@@ -50,7 +50,7 @@ const page = () => {
     const res = await fetch("/api/history", {
       method: "POST",
       body: JSON.stringify({
-        userId,
+        user,
         content: `User understands the explaination on ${input}`,
       }),
     });
@@ -78,12 +78,10 @@ const page = () => {
   };
 
   return (
-    <div>
+    <div className="">
       {/* <ChatInterface userId={userId} /> */}
       {/* <StepwiseChat userId={userId} /> */}
-      <TutorChat userId={userId} userName={"Himanshu"} 
-        topic={topic}
-      />
+      <TutorChat user={user} userName="User" topic={topic}  />
       {/* <ChatBox userId={userId} /> */}
     </div>
   );

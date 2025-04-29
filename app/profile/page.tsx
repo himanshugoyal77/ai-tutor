@@ -6,11 +6,10 @@ import supabaseClient from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import LoadingPage from "@/components/LoadingScreen";
+import { toast } from "react-hot-toast";
 
 type ProfileFormData = {
-  email: string;
   username: string;
-  avatar_url: string;
   age: number;
   standard: string;
   favourite_subjects: string;
@@ -26,117 +25,110 @@ const steps = [
 
 export default function ProfileForm() {
   const router = useRouter();
-  const { register, handleSubmit, reset, trigger } = useForm<ProfileFormData>();
+  const {
+    register,
+    handleSubmit,
+    reset,
+    trigger,
+    formState: { errors },
+  } = useForm<ProfileFormData>();
+
   const [currentStep, setCurrentStep] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    const fetchProfile = async () => {
-      setLoading(true);
-      const {
-        data: { user },
-      } = await supabaseClient.auth.getUser();
+    const checkAuthAndProfile = async () => {
+      try {
+        const {
+          data: { user },
+          error: authError,
+        } = await supabaseClient.auth.getUser();
 
-      const { data: profile, error } = await supabaseClient
-        .from("profile")
-        .select("*")
-        .eq("id", user?.id)
-        .maybeSingle();
+        if (authError || !user) {
+          throw authError || new Error("User not authenticated");
+        }
 
-      if (error) {
-        console.error("Error fetching profile:", error.message);
-        return;
-      }
+        const { data: profile, error: profileError } = await supabaseClient
+          .from("profile")
+          .select("*")
+          .eq("id", user.id)
+          .maybeSingle();
 
-      if (profile?.isprofile_setup) {
-        router.push("/home");
+        if (profileError) {
+          throw profileError;
+        }
+
+        if (profile?.isprofile_setup) {
+          router.push("/home");
+          return;
+        }
+
+        // Pre-fill form if partial profile exists
+        if (profile) {
+          reset({
+            username: profile.username || "",
+            age: profile.age || 0,
+            standard: profile.standard || "",
+            favourite_subjects: profile.favourite_subjects?.join(", ") || "",
+            learning_goals: profile.learning_goals?.join(", ") || "",
+          });
+        }
+      } catch (error) {
+        console.error("Error:", error);
+        toast.error("Failed to load profile data");
+        router.push("/");
+      } finally {
         setLoading(false);
       }
-
-      setLoading(false);
     };
 
-    fetchProfile();
-  }, []);
-
-  if (loading) {
-    return <LoadingPage />;
-  }
+    checkAuthAndProfile();
+  }, [router, reset]);
 
   const onSubmit = async (data: ProfileFormData) => {
-    setLoading(true);
-    setMessage("");
+    setIsSubmitting(true);
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabaseClient.auth.getUser();
 
-    const {
-      data: { user },
-    } = await supabaseClient.auth.getUser();
+      if (authError || !user) {
+        throw authError || new Error("User not authenticated");
+      }
 
-    if (!user) {
-      setMessage("Error: User not authenticated");
-      setLoading(false);
-      router.push("/");
-      return;
-    }
+      const formattedData = {
+        ...data,
+        id: user.id,
+        email: user.email,
+        avatar_url: user.user_metadata.avatar_url || "",
+        favourite_subjects: data.favourite_subjects
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        learning_goals: data.learning_goals
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        isprofile_setup: true,
+      };
 
-    // Convert the comma-separated favourite_subjects into an array
-    const formattedData = {
-      ...data,
-      id: user?.id,
-      email: user.email,
-      avatar_url: user.user_metadata.avatar_url,
-      favourite_subjects: data.favourite_subjects
-        ? data.favourite_subjects.split(",").map((s) => s.trim())
-        : [],
-      learning_goals: data.learning_goals
-        ? data.learning_goals.split(",").map((s) => s.trim())
-        : [],
-      isprofile_setup: true,
-    };
-
-    // check if user already has a profile
-    const { data: existingProfile } = await supabaseClient
-      .from("profile")
-      .select("*")
-      .eq("id", user.id);
-    console.log("user ud", user.id);
-    console.log("existingProfile", existingProfile);
-
-    if (existingProfile && existingProfile.length > 0) {
-      console.log("inside existing profile");
-      // Update the existing profile
+      // Upsert the profile data
       const { error } = await supabaseClient
         .from("profile")
-        .update([formattedData])
-        .eq("id", user.id);
+        .upsert(formattedData, { onConflict: "id" });
 
-      console.log("updating");
-      if (error) {
-        setMessage("Error: " + error.message);
-      } else {
-        console.log("updated");
-        setMessage("Profile updated successfully!");
-        reset();
-        router.push("/home");
-      }
-      setLoading(false);
-      return;
-    }
+      if (error) throw error;
 
-    // Insert into Supabase
-    const { error } = await supabaseClient
-      .from("profile")
-      .insert([formattedData]);
-
-    if (error) {
-      setMessage("Error: " + error.message);
-    } else {
-      setMessage("Profile created successfully!");
-      reset();
+      toast.success("Profile saved successfully!");
       router.push("/home");
+    } catch (error) {
+      console.error("Error saving profile:", error);
+      toast.error("Failed to save profile. Please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setLoading(false);
   };
 
   const nextStep = async () => {
@@ -145,6 +137,8 @@ export default function ProfileForm() {
 
     if (isValid) {
       setCurrentStep((prev) => Math.min(prev + 1, steps.length - 1));
+    } else {
+      toast.error("Please fill in all required fields");
     }
   };
 
@@ -157,7 +151,7 @@ export default function ProfileForm() {
       {steps.map((_, index) => (
         <div
           key={index}
-          className={`w-3 h-3 rounded-full ${
+          className={`w-3 h-3 rounded-full transition-colors ${
             index === currentStep ? "bg-[#FF6B6B]" : "bg-[#4ECDC4]/30"
           }`}
         />
@@ -173,11 +167,16 @@ export default function ProfileForm() {
             <div className="flex flex-col gap-4">
               <label className="text-[#2D3047] font-[Baloo] text-xl">
                 What should we call you? 🎩
+                {errors.username && (
+                  <span className="text-[#FF6B6B] text-sm ml-2">Required</span>
+                )}
               </label>
               <input
                 {...register("username", { required: true })}
                 placeholder="Super Learner Name"
-                className="p-4 rounded-xl border-2 border-[#4ECDC4] focus:border-[#FF6B6B] focus:ring-2 focus:ring-[#FFE66D]"
+                className={`p-4 rounded-xl border-2 ${
+                  errors.username ? "border-[#FF6B6B]" : "border-[#4ECDC4]"
+                } focus:border-[#FF6B6B] focus:ring-2 focus:ring-[#FFE66D]`}
               />
             </div>
 
@@ -187,10 +186,21 @@ export default function ProfileForm() {
               </label>
               <input
                 type="number"
-                {...register("age", { valueAsNumber: true })}
+                {...register("age", {
+                  valueAsNumber: true,
+                  min: { value: 5, message: "Age must be at least 5" },
+                  max: { value: 120, message: "Age must be less than 120" },
+                })}
                 placeholder="Enter your magic number"
-                className="p-4 rounded-xl border-2 border-[#4ECDC4] focus:border-[#FF6B6B]"
+                className={`p-4 rounded-xl border-2 ${
+                  errors.age ? "border-[#FF6B6B]" : "border-[#4ECDC4]"
+                } focus:border-[#FF6B6B]`}
               />
+              {errors.age && (
+                <span className="text-[#FF6B6B] text-sm">
+                  {errors.age.message}
+                </span>
+              )}
             </div>
           </div>
         );
@@ -243,18 +253,23 @@ export default function ProfileForm() {
     }
   };
 
+  if (loading) {
+    return <LoadingPage />;
+  }
+
   return (
     <div className="min-h-screen w-full flex flex-col bg-gradient-to-br from-[#FFF3E0] to-[#E8F4FF] pt-5 relative overflow-hidden items-center justify-center">
       <div className="absolute -z-10 inset-0 overflow-hidden">
         <div className="absolute w-48 h-48 bg-[#FF6B6B]/10 rounded-full -top-24 -left-24 animate-float"></div>
         <div className="absolute w-64 h-64 bg-[#4ECDC4]/10 rounded-full -bottom-32 -right-32 animate-float-delayed"></div>
       </div>
+
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-2xl mx-auto bg-white p-8 rounded-3xl shadow-xl border-4 border-[#FFE66D]"
+        className="max-w-2xl w-full mx-4 bg-white p-6 sm:p-8 rounded-3xl shadow-xl border-4 border-[#FFE66D]"
       >
-        <h2 className="text-3xl font-[Fredoka] text-center mb-6 text-[#FF6B6B]">
+        <h2 className="text-2xl sm:text-3xl font-[Fredoka] text-center mb-6 text-[#FF6B6B]">
           {steps[currentStep].title}
         </h2>
 
@@ -268,7 +283,8 @@ export default function ProfileForm() {
               <button
                 type="button"
                 onClick={prevStep}
-                className="px-6 py-3 bg-[#4ECDC4] text-white rounded-xl font-[Baloo] hover:bg-[#3DA89F] transition-colors"
+                disabled={isSubmitting}
+                className="px-4 sm:px-6 py-2 sm:py-3 bg-[#4ECDC4] text-white rounded-xl font-[Baloo] hover:bg-[#3DA89F] transition-colors disabled:opacity-50"
               >
                 ← Back
               </button>
@@ -278,28 +294,29 @@ export default function ProfileForm() {
               <button
                 type="button"
                 onClick={nextStep}
-                className="ml-auto px-8 py-3 bg-[#FF6B6B] text-white rounded-xl font-[Baloo] hover:bg-[#FF5252] transition-colors"
+                disabled={isSubmitting}
+                className="ml-auto px-6 sm:px-8 py-2 sm:py-3 bg-[#FF6B6B] text-white rounded-xl font-[Baloo] hover:bg-[#FF5252] transition-colors disabled:opacity-50"
               >
                 Next Step →
               </button>
             ) : (
               <button
-                type="submit"
-                disabled={loading}
+                type="button"
                 onClick={handleSubmit(onSubmit)}
-                className="ml-auto px-8 py-3 bg-gradient-to-r from-[#FF6B6B] to-[#4ECDC4] text-white rounded-xl font-[Baloo] hover:scale-105 transition-all"
+                disabled={isSubmitting}
+                className="ml-auto px-6 sm:px-8 py-2 sm:py-3 bg-gradient-to-r from-[#FF6B6B] to-[#4ECDC4] text-white rounded-xl font-[Baloo] hover:scale-105 transition-all disabled:opacity-70 cursor-pointer"
               >
-                {loading ? "🚀 Launching..." : "Start Learning Adventure!"}
+                {isSubmitting ? (
+                  <span className="flex items-center gap-2">
+                    <span className="animate-spin">🌀</span> Saving...
+                  </span>
+                ) : (
+                  "Start Learning Adventure!"
+                )}
               </button>
             )}
           </div>
         </form>
-
-        {message && (
-          <p className="mt-4 text-center text-[#4ECDC4] font-[Comic Neue]">
-            {message}
-          </p>
-        )}
       </motion.div>
     </div>
   );

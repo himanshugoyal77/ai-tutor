@@ -4,16 +4,28 @@ import supabaseClient from "@/lib/supabaseClient";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import React, { useEffect, useState } from "react";
+import { toast } from "react-hot-toast";
 
 const SignIn = () => {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
   // Function to check authentication and redirect if logged in
   const checkAuth = async () => {
-    const { data } = await supabaseClient.auth.getSession();
-    if (data?.session) {
-      router.push("/profile"); // Redirect if user is logged in
+    try {
+      const { data, error } = await supabaseClient.auth.getSession();
+
+      if (error) throw error;
+
+      if (data?.session) {
+        router.push("/profile");
+      }
+    } catch (error) {
+      console.error("Auth check error:", error);
+      toast.error("Failed to check authentication status");
+    } finally {
+      setAuthChecked(true);
     }
   };
 
@@ -30,22 +42,38 @@ const SignIn = () => {
     );
 
     return () => {
-      listener.subscription.unsubscribe();
+      listener?.subscription?.unsubscribe();
     };
   }, [router]);
 
   // Handle Google Sign-In
   const handleLogin = async () => {
     setLoading(true);
-    const { error } = await supabaseClient.auth.signInWithOAuth({
-      provider: "google",
-    });
+    try {
+      const { error } = await supabaseClient.auth.signInWithOAuth({
+        provider: "google",
+      });
 
-    if (error) {
-      console.error("Login error:", error.message);
+      if (error) throw error;
+
+      toast.success("Redirecting to authentication...");
+    } catch (error) {
+      console.error("Login error:", error);
+      toast.error("Failed to sign in. Please try again.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-[#FFF3E0] to-[#E8F4FF]">
+        <div className="text-2xl font-bold text-[#4ECDC4]">
+          Checking authentication...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen w-full flex flex-col bg-gradient-to-br from-[#FFF3E0] to-[#E8F4FF] pt-5 relative overflow-hidden">
@@ -67,13 +95,6 @@ const SignIn = () => {
             className="drop-shadow-lg"
           />
         </div>
-        <button
-          onClick={handleLogin}
-          disabled={loading}
-          className="px-6 py-3 text-lg font-bold rounded-2xl bg-[#FF6B6B] hover:bg-[#FF5252] text-white shadow-lg hover:shadow-xl transition-all flex items-center gap-2 cursor-pointer"
-        >
-          {loading ? "✨ Preparing Magic..." : "Join the Fun!"}
-        </button>
       </div>
 
       {/* Main Content */}
@@ -116,10 +137,12 @@ const SignIn = () => {
             <button
               onClick={handleLogin}
               disabled={loading}
-              className="px-8 py-4 text-xl rounded-2xl font-bold bg-[#4ECDC4] hover:bg-[#45B7AF] text-white shadow-lg hover:scale-105 transition-all flex items-center gap-3 w-full md:w-auto cursor-pointer"
+              className="px-8 py-4 text-xl rounded-2xl font-bold bg-[#4ECDC4] hover:bg-[#45B7AF] text-white shadow-lg hover:scale-105 transition-all flex items-center gap-3 w-full md:w-auto cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
             >
               {loading ? (
-                "🎠 Spinning Up Fun..."
+                <>
+                  <span className="animate-spin">🌀</span> Loading...
+                </>
               ) : (
                 <>
                   Start Learning Adventure!
@@ -129,12 +152,13 @@ const SignIn = () => {
             </button>
 
             <p className="mt-8 text-lg text-[#2D3047] font-[Baloo]">
-              Already have a secret code?{" "}
+              Already have an account?{" "}
               <button
                 className="text-[#FF6B6B] hover:text-[#FF5252] font-bold underline underline-offset-4 decoration-[#FFE66D] decoration-3 cursor-pointer"
                 onClick={handleLogin}
+                disabled={loading}
               >
-                Click Here to Enter! 🚪
+                Sign in here! 🚪
               </button>
             </p>
           </div>

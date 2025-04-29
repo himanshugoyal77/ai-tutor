@@ -2,14 +2,46 @@ import { Mistral } from "@mistralai/mistralai";
 import { encodeText, getMostRelevantUserHistory } from "./embeddings";
 import supabaseClient from "./supabaseClient";
 import axios from "axios";
+import Groq from "groq-sdk";
 
 const client = new Mistral({
   apiKey: "WaqqHNtuthNSd64Td3LjnjHXChxeVsld",
 });
 
+const groq = new Groq({
+  apiKey: "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",
+  dangerouslyAllowBrowser: true,
+});
+
+const checkEducationalTopic = async (
+  query: string,
+  conversationContext: string
+) => {
+  const prompt = `You are an AI tutor. Based on the conversation context, determine if the user's query is educational in nature. If it is, return true; otherwise, return false.
+                  conversationContext: ${conversationContext}
+                  userQuery: ${query}
+
+                  if the userQuery is answer to the question, then return true.
+                  
+                  only return true or false. Do not include any other text.`;
+  const response = await groq.chat.completions.create({
+    messages: [
+      {
+        role: "user",
+        content: prompt,
+      },
+    ],
+    model: "llama-3.3-70b-versatile",
+    response_format: { type: "json_object" },
+  });
+  console.log("Educational Topic Check Response:", response);
+  return response.choices[0].message.content;
+};
+
 export async function generatePersonalizedResponse(
   userId: string,
-  input: string
+  input: string,
+  userProfile: any
 ) {
   console.log("Fetching user history for:", userId);
 
@@ -29,18 +61,22 @@ export async function generatePersonalizedResponse(
 
   console.log("Conversation History:", conversationHistory);
 
-  // Fetch user profile
-  const { data: userProfile, error } = await supabaseClient
-    .from("profile")
-    .select(
-      "username, age, standard, favourite_subjects, learning_goals, give_hints"
-    )
-    .eq("id", userId)
-    .single();
+  // Include conversation history in the prompt
+  let conversationContext = conversationHistory
+    .reverse()
+    .map((msg) => `${msg.role}: ${msg.message}`)
+    .join("\n");
 
-  if (error) {
-    console.error("Error fetching user profile:", error);
-    return "Error fetching user profile.";
+  const isEducational = await checkEducationalTopic(input, conversationContext);
+
+  console.log("Is Educational Topic:", isEducational);
+  if (isEducational === "false") {
+    return JSON.stringify({
+      mainResponse: "This query does not seem educational. Please ask something related to your learning goals.",
+      followUpQuestions: [],
+      difficultyLevel: "N/A",
+      relatedTopics: [],
+    })
   }
 
   console.log("User Profile:", userProfile, userId);
@@ -70,12 +106,6 @@ export async function generatePersonalizedResponse(
        - **Step 3:** Encourage interaction by breaking down complex topics.`
     : `- Directly provide the answer without guiding questions.
        - Keep the response clear, concise, and to the point.`;
-
-  // Include conversation history in the prompt
-  let conversationContext = conversationHistory
-    .reverse()
-    .map((msg) => `${msg.role}: ${msg.message}`)
-    .join("\n");
 
   // Construct the prompt
   let guidedPrompt = `You are an AI tutor for ${userProfile.username}.
@@ -125,26 +155,26 @@ export async function generatePersonalizedResponse(
 
   console.log("AI Response:", aiResponse);
 
-  let evaluationResult;
-  try {
-    const evalResponse = await axios.post("http://localhost:5000/evaluate", {
-      text: aiResponse,
-      user_profile: {
-        username: userProfile.username,
-        age: userProfile.age,
-        standard: userProfile.standard,
-        favourite_subjects: userProfile.favourite_subjects,
-        learning_goals: userProfile.learning_goals,
-      },
-    });
-    evaluationResult = evalResponse.data;
-    console.log("Evaluation Result:", evalResponse);
-  } catch (error) {
-    console.error("Error evaluating response:", error);
-    evaluationResult = { error: "Evaluation failed" };
-  }
+  // let evaluationResult;
+  // try {
+  //   const evalResponse = await axios.post("http://localhost:5000/evaluate", {
+  //     text: aiResponse,
+  //     user_profile: {
+  //       username: userProfile.username,
+  //       age: userProfile.age,
+  //       standard: userProfile.standard,
+  //       favourite_subjects: userProfile.favourite_subjects,
+  //       learning_goals: userProfile.learning_goals,
+  //     },
+  //   });
+  //   evaluationResult = evalResponse.data;
+  //   console.log("Evaluation Result:", evalResponse);
+  // } catch (error) {
+  //   console.error("Error evaluating response:", error);
+  //   evaluationResult = { error: "Evaluation failed" };
+  // }
 
-  console.log("Evaluation Result:", evaluationResult);
+  // console.log("Evaluation Result:", evaluationResult);
 
   // Store user message and AI response in `conversations`
   await supabaseClient.from("conversations").insert([
